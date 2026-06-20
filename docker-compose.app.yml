@@ -1,0 +1,66 @@
+# Compose da aplicação. Acompanha o docker-compose.yml (LocalStack + gerador), ambos na raiz do projeto.
+# Sobe DynamoDB Local + um serviço de init idempotente + a aplicação. O init cria:
+#   - tabela DynamoDB "ledger" (+ GSI1)
+#   - fila SQS principal e DLQ com RedrivePolicy (no LocalStack)
+#
+# Pré-requisito: o LocalStack (docker-compose.yml) já deve estar rodando.
+# O init/app alcançam o SQS via host.docker.internal:4566 e o DynamoDB via dynamodb-local:8000.
+# Recomendado subir os dois arquivos juntos: docker compose -f docker-compose.yml -f docker-compose.app.yml ...
+
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:2.5.2
+    container_name: dynamodb-local
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8000 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  init:
+    image: amazon/aws-cli:2.17.0
+    container_name: ledger-init
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+    environment:
+      # Credenciais dummy — padrão local, NÃO são segredos reais.
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: sa-east-1
+      DYNAMO_ENDPOINT: http://dynamodb-local:8000
+      SQS_ENDPOINT: http://host.docker.internal:4566
+      QUEUE_NAME: conta-bancaria-criada
+      DLQ_NAME: conta-bancaria-criada-dlq
+      TABLE_NAME: ledger
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["/bin/sh", "/init/init.sh"]
+    volumes:
+      - ./local/init:/init:ro
+
+  # Aplicação conteinerizada. Em dev também é possível usar ./gradlew bootRun (perfil host).
+#  app:
+#    build:
+#      context: .
+#    container_name: conta-bancaria-app
+#    depends_on:
+#      dynamodb-local:
+#        condition: service_healthy
+#      init:
+#        condition: service_completed_successfully
+#    environment:
+#      # Credenciais dummy — padrão local, NÃO são segredos reais.
+#      AWS_ACCESS_KEY_ID: test
+#      AWS_SECRET_ACCESS_KEY: test
+#      AWS_REGION: sa-east-1
+#      DYNAMO_ENDPOINT: http://dynamodb-local:8000
+#      SQS_ENDPOINT: http://host.docker.internal:4566   # LocalStack (docker-compose.yml), publicado no host
+#    extra_hosts:
+#      - "host.docker.internal:host-gateway"
+#    ports:
+#      - "127.0.0.1:8080:8080"

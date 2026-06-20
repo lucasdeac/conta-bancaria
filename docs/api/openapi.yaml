@@ -1,0 +1,189 @@
+openapi: 3.0.3
+info:
+  title: Conta Bancária — Autorizador de Transações
+  version: 0.1.0
+  description: >
+    API de autorização de transações financeiras (crédito/débito) sobre contas bancárias.
+    Contas são criadas de forma assíncrona via fila SQS (fora deste contrato).
+servers:
+  - url: http://localhost:8080
+    description: Local
+paths:
+  /transactions/{transactionId}:
+    post:
+      summary: Autoriza uma transação (CREDIT ou DEBIT)
+      description: >
+        Idempotente pelo transactionId. Reenvios retornam o resultado já processado.
+        Débito que resultaria em saldo negativo é recusado sem alterar o saldo.
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          description: Identificador único da transação (UUID), usado como chave de idempotência.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionRequest'
+      responses:
+        '200':
+          description: Transação aprovada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
+        '422':
+          description: >
+            Transação recusada (status FAILED) por regra de negócio: saldo insuficiente,
+            conta desabilitada, conta inexistente ou moeda divergente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
+        '400':
+          description: Requisição inválida (validação de schema)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Transação ainda em processamento (reenvio durante estado PENDING)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /accounts/{accountId}/balance:
+    get:
+      summary: Consulta o saldo atual da conta
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Saldo atual
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '404':
+          description: Conta não encontrada
+  /accounts/{accountId}/statement:
+    get:
+      summary: Extrato bancário (paginado)
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          description: Token de paginação opaco
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Página do extrato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Statement'
+components:
+  schemas:
+    TransactionRequest:
+      type: object
+      required: [accountId, type, amount]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+          description: Conta alvo da transação.
+        type:
+          type: string
+          enum: [CREDIT, DEBIT]
+        amount:
+          $ref: '#/components/schemas/Money'
+    Money:
+      type: object
+      required: [value, currency]
+      properties:
+        value:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          example: 97.07
+        currency:
+          type: string
+          description: Código ISO 4217
+          pattern: '^[A-Z]{3}$'
+          example: BRL
+    AuthorizationResponse:
+      type: object
+      properties:
+        transaction:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            type:
+              type: string
+              enum: [CREDIT, DEBIT]
+            amount:
+              $ref: '#/components/schemas/Money'
+            status:
+              type: string
+              enum: [SUCCEEDED, FAILED]
+            failureReason:
+              type: string
+              enum: [INSUFFICIENT_BALANCE, ACCOUNT_DISABLED, ACCOUNT_NOT_FOUND, CURRENCY_MISMATCH]
+              nullable: true
+            timestamp:
+              type: string
+              format: date-time
+        account:
+          $ref: '#/components/schemas/Account'
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        balance:
+          $ref: '#/components/schemas/Money'
+    Statement:
+      type: object
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuthorizationResponse'
+        nextCursor:
+          type: string
+          nullable: true
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

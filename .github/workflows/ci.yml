@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+# Token do workflow com o mínimo de permissão (least privilege).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Unit tests
+        run: ./gradlew test --no-daemon
+
+      # O runner ubuntu-latest já tem Docker; o Testcontainers funciona sem configuração extra.
+      - name: Integration tests (Testcontainers + LocalStack)
+        run: ./gradlew integrationTest --no-daemon
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: build/reports/tests
+          if-no-files-found: ignore
+
+  image:
+    name: Build image & vulnerability scan
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t conta-bancaria:${{ github.sha }} .
+
+      # Gate de segurança: falha o build se houver vulnerabilidade HIGH/CRITICAL com correção disponível.
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: conta-bancaria:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'

@@ -1,0 +1,27 @@
+# Build
+build/
+target/
+out/
+bin/
+.gradle/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+
+# Logs / temp
+*.log
+*.tmp
+
+# Secrets / env (nunca commitar credenciais reais)
+.env
+.env.local
+*.pem
+*.key

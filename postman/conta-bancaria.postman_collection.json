@@ -1,0 +1,175 @@
+{
+  "info": {
+    "name": "conta-bancaria — Autorizador de Transações",
+    "description": "Coleção de requisições do autorizador. Use o environment 'conta-bancaria (local)'. Preencha 'accountId' com um id de conta válido (obtido da fila SQS, após o consumer processá-la). O 'transactionId' é gerado automaticamente a cada envio via pre-request script.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "accountId", "value": "COLOQUE_UM_ACCOUNT_ID_VALIDO" },
+    { "key": "txnId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Autorizar CRÉDITO",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Gera um novo transactionId (UUID) e guarda para o teste de reenvio.",
+              "pm.collectionVariables.set('txnId', pm.variables.replaceIn('{{$randomUUID}}'));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200 (SUCCEEDED)', () => pm.response.to.have.status(200));",
+              "pm.test('transação SUCCEEDED', () => pm.expect(pm.response.json().transaction.status).to.eql('SUCCEEDED'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": {
+          "raw": "{{baseUrl}}/transactions/{{txnId}}",
+          "host": [ "{{baseUrl}}" ],
+          "path": [ "transactions", "{{txnId}}" ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"accountId\": \"{{accountId}}\",\n  \"type\": \"CREDIT\",\n  \"amount\": { \"value\": 97.07, \"currency\": \"BRL\" }\n}"
+        }
+      }
+    },
+    {
+      "name": "2. Autorizar DÉBITO",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('txnId', pm.variables.replaceIn('{{$randomUUID}}'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": {
+          "raw": "{{baseUrl}}/transactions/{{txnId}}",
+          "host": [ "{{baseUrl}}" ],
+          "path": [ "transactions", "{{txnId}}" ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"accountId\": \"{{accountId}}\",\n  \"type\": \"DEBIT\",\n  \"amount\": { \"value\": 10.00, \"currency\": \"BRL\" }\n}"
+        }
+      }
+    },
+    {
+      "name": "3. DÉBITO acima do saldo (recusado)",
+      "description": "Demonstra a recusa por saldo insuficiente: status 422 e FAILED, saldo inalterado.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('txnId', pm.variables.replaceIn('{{$randomUUID}}'));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 422 (FAILED)', () => pm.response.to.have.status(422));",
+              "pm.test('motivo INSUFFICIENT_BALANCE', () => pm.expect(pm.response.json().transaction.failureReason).to.eql('INSUFFICIENT_BALANCE'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": {
+          "raw": "{{baseUrl}}/transactions/{{txnId}}",
+          "host": [ "{{baseUrl}}" ],
+          "path": [ "transactions", "{{txnId}}" ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"accountId\": \"{{accountId}}\",\n  \"type\": \"DEBIT\",\n  \"amount\": { \"value\": 999999.00, \"currency\": \"BRL\" }\n}"
+        }
+      }
+    },
+    {
+      "name": "4. Reenvio idempotente (mesmo txnId do passo 1)",
+      "description": "NÃO gera novo txnId — reutiliza o do último CRÉDITO. Deve retornar o MESMO resultado (replay), sem aplicar o valor de novo.",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('mesmo resultado do original (idempotente)', () => pm.expect(pm.response.json().transaction.id).to.eql(pm.collectionVariables.get('txnId')));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": {
+          "raw": "{{baseUrl}}/transactions/{{txnId}}",
+          "host": [ "{{baseUrl}}" ],
+          "path": [ "transactions", "{{txnId}}" ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"accountId\": \"{{accountId}}\",\n  \"type\": \"CREDIT\",\n  \"amount\": { \"value\": 97.07, \"currency\": \"BRL\" }\n}"
+        }
+      }
+    },
+    {
+      "name": "Consultas (saldo e extrato)",
+      "item": [
+        {
+          "name": "Consultar saldo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{accountId}}/balance",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "accounts", "{{accountId}}", "balance" ]
+            }
+          }
+        },
+        {
+          "name": "Extrato",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{accountId}}/statement?limit=50",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "accounts", "{{accountId}}", "statement" ],
+              "query": [ { "key": "limit", "value": "50" } ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.5'
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+group = 'com.estudos'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    springCloudAwsVersion = '3.2.1'
+    resilience4jVersion = '2.2.0'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "io.awspring.cloud:spring-cloud-aws-dependencies:${springCloudAwsVersion}"
+    }
+}
+
+dependencies {
+    // Lombok — só em tempo de compilação (não vai para o runtime)
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // Web + validação (input validation no controller)
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // Observabilidade
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+    // Logs estruturados (JSON) para Logback
+    implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
+
+    // AWS — SQS (consumer) e DynamoDB (enhanced client)
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
+    implementation 'software.amazon.awssdk:dynamodb-enhanced'
+
+    // Resiliência: retry + backoff/jitter, circuit breaker, time limiter
+    implementation "io.github.resilience4j:resilience4j-spring-boot3:${resilience4jVersion}"
+
+    // IDs (ULID) — quando necessário
+    implementation 'com.github.f4b6a3:ulid-creator:5.2.3'
+
+    // Testes (unit + integração com LocalStack via Testcontainers)
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.testcontainers:junit-jupiter:1.20.3'
+    testImplementation 'org.testcontainers:localstack:1.20.3'
+    testImplementation 'org.awaitility:awaitility:4.2.2'
+}
+
+// Apenas o boot jar (executável); desabilita o jar "-plain" para o build da imagem.
+tasks.named('jar') {
+    enabled = false
+}
+
+// Em dev (bootRun), ativa o perfil 'local' → logs em texto legível em vez de JSON.
+// O JSON segue como padrão no jar/imagem (produção).
+tasks.named('bootRun') {
+    systemProperty 'spring.profiles.active', 'local'
+}
+
+// Testes unitários (rápidos, sem Docker). Classes *IT ficam de fora.
+tasks.named('test') {
+    useJUnitPlatform()
+    filter {
+        excludeTestsMatching '*IT'
+    }
+}
+
+// Testes de integração (Testcontainers + LocalStack). Exigem Docker rodando.
+tasks.register('integrationTest', Test) {
+    description = 'Roda os testes de integração (*IT) com Testcontainers.'
+    group = 'verification'
+    useJUnitPlatform()
+    filter {
+        includeTestsMatching '*IT'
+    }
+    shouldRunAfter('test')
+}

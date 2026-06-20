@@ -1,0 +1,20 @@
+# Build artifacts (a imagem builda do zero)
+build/
+.gradle/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Não precisam ir para a imagem
+docs/
+postman/
+local/
+*.md
+
+# Segredos (garantia extra — nunca vão para a imagem)
+.env
+*.pem
+*.key

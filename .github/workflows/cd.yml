@@ -1,0 +1,51 @@
+# =============================================================================
+# PROPOSTA / TEMPLATE de Continuous Deployment — estratégia canary com rollback.
+#
+# Os passos de deploy são PLACEHOLDERS (echo). Substitua pelos comandos reais do
+# seu alvo de cloud (ex.: AWS ECS + CodeDeploy canary, ou `aws deploy create-deployment`).
+# O objetivo aqui é documentar, de forma executável, a ESTRATÉGIA que mitiga o risco
+# de um bug atingir 100% dos clientes (ver docs/adr/0008-deploy-and-pipeline.md).
+#
+# Disparo manual (workflow_dispatch) de propósito — não há ambiente real conectado.
+# =============================================================================
+name: CD (proposta — canary)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Tag da imagem a publicar
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging:
+    name: Deploy staging + smoke
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - run: echo "Deploy da imagem ${{ inputs.image_tag }} em staging"
+      - run: echo "Smoke tests (health/readiness + 1 transação de ponta a ponta)"
+
+  canary:
+    name: Canary 10%
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: echo "Roteia ~10% do tráfego para a nova versão"
+      # Janela de observação: compara métricas da nova versão vs. baseline.
+      # Sinais: error rate, latência p99, taxa de recusa (authorizations.total status=FAILED),
+      # estado do circuit breaker. Se degradar -> step de rollback aborta a promoção.
+      - run: echo "Observa métricas por N minutos (Prometheus/CloudWatch)"
+      - run: echo "Se métricas saudáveis -> segue; senão -> rollback automático"
+
+  promote:
+    name: Rollout 100%
+    needs: canary
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: echo "Promove a nova versão para 100% do tráfego"

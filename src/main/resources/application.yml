@@ -1,0 +1,71 @@
+spring:
+  application:
+    name: conta-bancaria
+
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:sa-east-1}
+      # Credenciais via env var. Em local, padrão "test" (LocalStack) — NÃO são segredos reais.
+      # Em produção: deixar em branco para usar a IAM role (DefaultCredentialsProvider).
+      credentials:
+        access-key: ${AWS_ACCESS_KEY_ID:test}
+        secret-key: ${AWS_SECRET_ACCESS_KEY:test}
+      sqs:
+        # Endpoint do LocalStack em dev; em produção, deixar vazio (endpoint AWS real).
+        endpoint: ${SQS_ENDPOINT:http://localhost:4566}
+
+server:
+  port: 8080
+
+# Configuração da aplicação (não-secreta)
+app:
+  dynamodb:
+    endpoint: ${DYNAMO_ENDPOINT:http://localhost:8000}
+    table-name: ${DYNAMO_TABLE:ledger}
+  sqs:
+    account-created-queue: ${ACCOUNT_QUEUE:conta-bancaria-criada}
+  account:
+    default-currency: ${ACCOUNT_CURRENCY:BRL}   # moeda da conta (premissa P9)
+  timezone: ${APP_TIMEZONE:America/Sao_Paulo}    # offset do timestamp na resposta (ISO8601)
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true   # liveness/readiness
+      group:
+        readiness:
+          include: readinessState, dynamoDb, sqs   # readiness só fica UP se SQS + Dynamo respondem
+  metrics:
+    tags:
+      application: conta-bancaria
+
+# Resiliência (Resilience4j) — afinar conforme medições
+resilience4j:
+  retry:
+    instances:
+      dynamodb:
+        max-attempts: 3
+        wait-duration: 100ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        enable-randomized-wait: true   # full jitter
+  circuitbreaker:
+    instances:
+      dynamodb:
+        sliding-window-size: 50
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+  timelimiter:
+    instances:
+      dynamodb:
+        timeout-duration: 2s
+
+logging:
+  level:
+    root: INFO

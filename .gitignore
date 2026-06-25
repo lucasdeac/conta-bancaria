@@ -1,7 +1,6 @@
 # Build
 build/
 target/
-out/
 bin/
 .gradle/
 
